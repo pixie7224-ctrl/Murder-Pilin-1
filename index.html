@@ -514,7 +514,7 @@ function startOffline(reason){
  phase='lobby';showLobby();
  setStatus(reason?`Сервер PeerJS недоступен (${reason}). Включён офлайн-режим с ботами`:'Офлайн-режим: игра с ботами без сервера','info')}
 $('#btnOffline').onclick=()=>{if(!busy)startOffline()};
-$('#btnBot').onclick=()=>{if(offline&&Object.keys(players).length<MAXP){addBot();renderLobby()}};
+$('#btnBot').onclick=()=>{if(isHost&&phase==='lobby'&&Object.keys(players).length<MAXP){addBot();broadcastLobby()}};
 
 $('#btnJoin').onclick=joinLobby;
 async function joinLobby(){
@@ -578,7 +578,7 @@ function kickPlayer(id){
 }
 function renderLobby(){
  if(phase!=='play')seatAll();
- $('#lCode').textContent=offline?'ОФЛАЙН':code;$('#netRow').style.display=offline?'none':'flex';$('#btnBot').style.display=offline?'block':'none';
+ $('#lCode').textContent=offline?'ОФЛАЙН':code;$('#netRow').style.display=offline?'none':'flex';$('#btnBot').style.display=isHost?'block':'none';
  $('#btnRS').style.display=isHost?'block':'none';
  $('#mapInfo').textContent='Карта: '+(settings.map==='random'?'случайная':MAPS[settings.map].n)+' · Маньяк'+ROLEKEYS.filter(k=>settings.roles[k]&&settings.roles[k].on).map(k=>', '+RN[k]+' '+settings.roles[k].p+'%').join('');
  if($('#rs').style.display==='flex')renderRS();
@@ -642,13 +642,13 @@ function navTarget(m){
  if(phase!=='play'||!m.alive||S.ph==='duel')return null;const h=HOUSES[m.hi];if(!h)return null;
  if(S.ph==='day')return Math.hypot(m.x-FIRE[0],m.y-FIRE[1])>190?{x:FIRE[0],y:FIRE[1],l:'к костру'}:null;
  if(G.role==='murderer'&&S.stage==='act'){const v=G.choice.tg&&players[G.choice.tg];if(v&&v.alive&&HOUSES[v.hi])return {x:HOUSES[v.hi].dout[0],y:HOUSES[v.hi].dout[1],l:'к жертве'};return null}
- if(inHouse(m,h))return null;
+ if(inHouse(m,h))return Math.hypot(m.x-h.cx,m.y-h.cy)>=45?{x:h.cx,y:h.cy,l:'в кровать'}:null;
  return Math.hypot(m.x-h.dout[0],m.y-h.dout[1])>46?{x:h.dout[0],y:h.dout[1],l:'домой'}:{x:h.din[0],y:h.din[1],l:'домой'};
 }
 function startDay(){S.ph='day';S.stage='plan';S.t=settings.time;G.choice={};
  for(const p of pl()){p.vote=null;p.invT=0;p.plan=null;p.shot=null;p.insp=false;p.pauseT=0;if(p.alive&&p.bot){const h=HOUSES[p.hi];goPath(p,[h.din,h.dout,h.seat],1)}}
  if(S.day>1)grantMut()}
-function startNight(){S.ph='night';S.stage='plan';S.t=S.nt0=nightLen();G.choice={};S.res={killed:[],bitten:[],saved:false,msgs:[]};
+function startNight(){S.ph='night';S.stage='plan';S.mask=false;S.t=S.nt0=nightLen();G.choice={};S.res={killed:[],bitten:[],saved:false,msgs:[]};
  for(const p of pl()){p.shield=null;p.plan=null;p.shot=null;p.gd=p.hl=p.lt=null;p.insp=false;p.pauseT=0;if(p.alive&&p.bot){const h=HOUSES[p.hi];goPath(p,[h.dout,h.din,[h.cx,h.cy]],2)}}}
 // мутации открываются не сразу: каждый рассвет маньяк может получить одну новую
 function grantMut(){for(const m of pl()){if(m.role!=='murderer'||!m.alive)continue;m.mu=m.mu||{};
@@ -675,10 +675,11 @@ function tick(){
   else if(S.ph==='day'&&Math.hypot(p.x-FIRE[0],p.y-FIRE[1])<175)st=1;
   else if(S.ph==='night'&&h&&inHouse(p,h)&&Math.hypot(p.x-h.cx,p.y-h.cy)<50)st=2;
   else st=6;
-  p.st=st;p.inv=p.invT>0;p.mk=p.role==='murderer'&&S.ph==='night'}
+  p.st=st;p.inv=p.invT>0;p.mk=p.role==='murderer'&&S.ph==='night'&&!!S.mask}
+ if(S.ph==='night'&&!S.mask){const o=pl().filter(q=>q.alive&&q.role!=='murderer');if(o.length&&o.every(q=>q.st===2))S.mask=true}   // все легли — маньяк меняет облик
  if(S.ph==='night'&&S.stage==='plan'&&S.t<=S.nt0-PLAN)beginHunt();
  if(S.t<=0)endPhase();
- if(phase==='play')broadcast({t:'st',ph:S.ph,sg:S.stage,day:S.day,tl:S.t,p:pl().map(p=>[p.id,Math.round(p.x),Math.round(p.y),p.alive?1:0,p.st|0,p.hp|0,p.invT>0?1:0,Math.round((p.fa||0)*100),p.role==='murderer'&&S.ph==='night'?1:0])});
+ if(phase==='play')broadcast({t:'st',ph:S.ph,sg:S.stage,day:S.day,tl:S.t,p:pl().map(p=>[p.id,Math.round(p.x),Math.round(p.y),p.alive?1:0,p.st|0,p.hp|0,p.invT>0?1:0,Math.round((p.fa||0)*100),p.role==='murderer'&&S.ph==='night'&&S.mask?1:0])});
 }
 function endPhase(){
  if(S.ph==='duel'){if(!S.dr)duelResolve();else checkWin();return}
@@ -1030,7 +1031,7 @@ function frame(now){
  else if(!m.alive)hh='Вы наблюдаете за игрой';
  else if(duel)hh='Финальная дуэль: убежать нельзя';
  else if(!night)hh='День: идите к костру. Обсудите и проголосуйте в панели справа';
- else if(G.role==='murderer')hh='Ночь: найдите жертву — E / клик — удар'+(G.mu&&G.mu.invis?', Q — невидимка':'')+(G.mu&&G.mu.leap?', Пробел — прыжок':'');
+ else if(G.role==='murderer')hh=(m.mk?'':'(пока не все спят — вы без маски) ')+'Ночь: найдите жертву — E / клик — удар'+(G.mu&&G.mu.invis?', Q — невидимка':'')+(G.mu&&G.mu.leap?', Пробел — прыжок':'');
  else if(!plan)hh='Ночь: в темноте ничего не видно. Оставайтесь дома';
  else hh={sheriff:'Ночь: можете выстрелить (один патрон)',detective:'Ночь: проверьте роль одного игрока',guard:'Ночь: выберите, кого охранять',priest:'Ночь: выберите, кого исцелить',lamp:'Ночь: зажгите фонарь у чьего-то дома',spy:'Ночь: вы видите дальше остальных',doctor:'Ночь: выберите, кого защитить'}[G.role]||'Ночь: идите домой и дождитесь утра';
  $('#hint').style.display=phase==='lobby'?'none':'block';
@@ -1461,6 +1462,8 @@ const UAP=`Один маньяк. Остальные хотят дожить д�
 Ваша цель — чтобы вас изгнали голосованием=>Ваша мета — щоб вас вигнали голосуванням
 Выжить и вычислить маньяка=>Вижити й вирахувати маніяка
 Готово=>Готово
+в кровать=>у ліжко
+(пока не все спят — вы без маски) =>(поки не всі сплять — ви без маски) 
 Полный экран=>Повний екран
 джойстик — ходьба, свайп — камера=>джойстик — ходьба, свайп — камера
 джойстик — ходьба=>джойстик — ходьба
@@ -1537,7 +1540,7 @@ $('#fogR').oninput=e=>{UI.fog=+e.target.value;$('#fogV').textContent=UI.fog+'%';
 $('#vtp').onclick=()=>{UI.cam='tp';applyUI()};$('#vfp').onclick=()=>{UI.cam='fp';applyUI()};
 $('#lru').onclick=()=>{UI.lang='ru';applyUI()};$('#lua').onclick=()=>{UI.lang='ua';applyUI()};
 applyUI();
-window.__mm={get NAV(){return NAV},get R3(){return R3on},fn:{grantMut,strike,tick},get S(){return S},get players(){return players},get settings(){return settings},get G(){return G}};
+window.__mm={get HOUSES(){return HOUSES},get NAV(){return NAV},get R3(){return R3on},fn:{grantMut,strike,tick},get S(){return S},get players(){return players},get settings(){return settings},get G(){return G}};
 })();
 </script>
 </body>
