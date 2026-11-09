@@ -150,6 +150,10 @@ button{touch-action:manipulation}
  #rs,#sk{align-items:flex-start}
 }
 @media (max-height:520px) and (min-width:761px){#actPanel{left:auto;right:8px;width:340px;max-height:calc(100% - 210px)}}
+#mn{display:none;position:fixed;inset:0;z-index:60;background:#000b;align-items:center;justify-content:center;padding:16px;overflow:auto}
+#mn .card{animation:rise .4s both}
+textarea{width:100%;padding:10px;background:#0a0b14;border:1px solid var(--line);border-radius:10px;color:var(--tx);font:12px monospace;resize:vertical}
+#sp{max-height:calc(100% - 90px);overflow:auto}
 </style>
 </head>
 <body>
@@ -178,6 +182,7 @@ button{touch-action:manipulation}
   <div class="row"><input type="text" id="joinCode" maxlength="5" placeholder="ABCDE" autocomplete="off" style="text-transform:uppercase"><button id="btnJoin" class="cyan" style="flex:0 0 auto">Присоединиться</button></div>
   <button id="btnSkin" class="full">Скин ножа</button>
   <button id="btnOffline" class="full">Играть офлайн с ботами</button>
+  <div class="note" id="netNote" style="text-align:center;margin-top:8px"></div>
   <div class="err" id="menuErr"></div>
 </div></div>
 
@@ -190,6 +195,7 @@ button{touch-action:manipulation}
     <div class="code" id="lCode">-----</div>
     <div class="row" id="netRow"><button id="btnCopy">Копировать код</button><button id="btnLink">Копировать ссылку</button></div>
     <button id="btnBot" class="full" style="display:none">+ Добавить бота</button>
+    <button id="btnInvite" class="full" style="display:none">➕ Пригласить игрока (код)</button>
     <div class="plist" id="lPlayers"></div>
     <div class="set">
       <label for="sMin" style="margin:8px 0 0">Минимум игроков для старта</label><span id="vMin"></span>
@@ -225,9 +231,11 @@ button{touch-action:manipulation}
 
 <div id="rs"><div class="card" id="rsBody"></div></div>
 <div id="sk"><div class="card" id="skBody"></div></div>
+<div id="mn"><div class="card" id="mnBody"></div></div>
 <button id="gear" aria-label="Настройки">⚙</button>
 <div id="sp" class="card"><h2>Настройки</h2><label>Режим картинки</label><div class="row"><button id="v2d">2D</button><button id="v3d">3D</button></div><label>Туман в 3D: <b id="fogV">100%</b></label><input type="range" id="fogR" min="0" max="200" step="10" value="100" style="width:100%;accent-color:#a8443a">
-<label>Камера в 3D</label><div class="row"><button id="vtp">От 3-го лица</button><button id="vfp">От 1-го лица</button></div><button id="fsb" class="full">⛶ Полный экран</button><label>Язык</label><div class="row"><button id="lru">Русский</button><button id="lua">Українська</button></div></div>
+<label>Камера в 3D</label><div class="row"><button id="vtp">От 3-го лица</button><button id="vfp">От 1-го лица</button></div><label>Способ подключения</label><button id="n1" class="full">1 · Сервер: по коду (как сейчас)</button><button id="n2" class="full">2 · Вручную: код-приглашение</button><button id="n3" class="full">3 · Локально: вкладки браузера</button><div class="note" id="nDesc" style="margin-top:6px"></div>
+<button id="fsb" class="full">⛶ Полный экран</button><label>Язык</label><div class="row"><button id="lru">Русский</button><button id="lua">Українська</button></div></div>
 <script>
 (()=>{
 const $=s=>document.querySelector(s);
@@ -425,7 +433,7 @@ let settings={min:3,time:60,speed:170,vision:220,map:'forest',man:1,roles:{docto
 let S={ph:'day',day:1,t:0,stage:'plan'},G={role:'civ',mut:null,ab:{inv:0,snake:0},choice:{},known:{}};
 let loop=null,cdTimer=null,joinTimer=null,code='',autoJoin=false,offline=false;
 function show(id){cur=id;document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('active',s.id===id))}
-function showLobby(){show('game');renderLobby()}
+function showLobby(){$('#mn').style.display='none';show('game');renderLobby()}
 
 // ================= СТАТУС =================
 function setStatus(t,type='info'){const s=$('#status');s.className=type;s.style.display='flex';s.querySelector('span').textContent=t;
@@ -460,7 +468,7 @@ if(urlJoin){$('#joinCode').value=urlJoin;autoJoin=true}
 if(profile)toMenu();else setAv(genAvatar());
 
 // ================= СЕТЬ =================
-function cleanup(){clearInterval(loop);clearInterval(cdTimer);clearTimeout(joinTimer);loop=cdTimer=null;
+function cleanup(){closeNet();clearInterval(loop);clearInterval(cdTimer);clearTimeout(joinTimer);loop=cdTimer=null;
  const p=peer;peer=null;hostConn=null;try{p&&p.destroy()}catch(e){}
  players={};phase='lobby';offline=false;$('#count').style.display='none'}
 function fail(msg){err('FAIL:',msg);cleanup();toMenu();setStatus(msg,'err')}
@@ -468,7 +476,7 @@ function leave(msg){cleanup();toMenu();hideStatus();if(msg)setStatus(msg,'err')}
 const me_=()=>({id:me.id,nick:profile.nick,avatar:profile.avatar,skin:profile.skin||'knife',alive:true,keys:{}});
 const lobbyLink=()=>location.href.split(/[?#]/)[0]+'?join='+code;
 
-$('#btnCreate').onclick=createLobby;
+$('#btnCreate').onclick=()=>UI.net==='manual'?createManual():UI.net==='local'?createLocal():createLobby();
 async function createLobby(){
  if(busy)return;setBusy(true);cleanup();isHost=true;setStatus('Загрузка PeerJS…');
  try{await peerReady}catch(e){return startOffline('PeerJS не загрузился')}
@@ -516,7 +524,7 @@ function startOffline(reason){
 $('#btnOffline').onclick=()=>{if(!busy)startOffline()};
 $('#btnBot').onclick=()=>{if(isHost&&phase==='lobby'&&Object.keys(players).length<MAXP){addBot();broadcastLobby()}};
 
-$('#btnJoin').onclick=joinLobby;
+$('#btnJoin').onclick=()=>{if(UI.net==='manual')openMn(false);else if(UI.net==='local')joinLocal($('#joinCode').value);else joinLobby()};
 async function joinLobby(){
  if(busy)return;const c=$('#joinCode').value.toUpperCase().replace(/[^A-Z0-9]/g,'');
  if(c.length<5){setStatus('Введите код лобби из 5 символов','err');return}
@@ -536,6 +544,7 @@ async function joinLobby(){
 function clientMsg(d){
  if(d.t!=='st')log('← от хоста',d.t);
  if(d.t==='deny')fail(d.m);
+ else if(d.t==='hello')me.id=d.id;
  else if(d.t==='kicked')leave('Вас исключили из лобби');
  else if(d.t==='lobby'){settings=d.settings;hostId=d.host;code=d.code;
   const old=players;players={};d.list.forEach(p=>players[p.id]=Object.assign(old[p.id]||{},p));
@@ -578,7 +587,7 @@ function kickPlayer(id){
 }
 function renderLobby(){
  if(phase!=='play')seatAll();
- $('#lCode').textContent=offline?'ОФЛАЙН':code;$('#netRow').style.display=offline?'none':'flex';$('#btnBot').style.display=isHost?'block':'none';
+ $('#lCode').textContent=offline?'ОФЛАЙН':code;$('#netRow').style.display=(offline||NX.manual)?'none':'flex';$('#btnBot').style.display=isHost?'block':'none';$('#btnInvite').style.display=(isHost&&NX.manual)?'block':'none';
  $('#btnRS').style.display=isHost?'block':'none';
  $('#mapInfo').textContent='Карта: '+(settings.map==='random'?'случайная':MAPS[settings.map].n)+' · Маньяк'+ROLEKEYS.filter(k=>settings.roles[k]&&settings.roles[k].on).map(k=>', '+RN[k]+' '+settings.roles[k].p+'%').join('');
  if($('#rs').style.display==='flex')renderRS();
@@ -1038,6 +1047,93 @@ function frame(now){
  $('#hint').textContent=hh+(NAV?'  ➜ '+NAV.l:'')+(IS_TOUCH?'  [джойстик — ходьба'+(R3on?', свайп — камера':'')+']':'  [WASD / стрелки'+(R3on?', зажмите мышь — камера, колесо — зум':'')+']');
 }
 requestAnimationFrame(frame);
+// ================= СПОСОБЫ ПОДКЛЮЧЕНИЯ: 1 сервер, 2 вручную (WebRTC), 3 локально (вкладки) =================
+class Cn{constructor(id){this.peer=id;this.open=false;this.h={};this.tx=null;this.cl=null}
+ on(e,f){(this.h[e]=this.h[e]||[]).push(f);return this}
+ emit(e,a){(this.h[e]||[]).slice().forEach(f=>{try{f(a)}catch(x){err('conn',x)}})}
+ send(m){if(this.tx)this.tx(m)}
+ close(){const w=this.open;this.open=false;if(this.cl)try{this.cl()}catch(e){}if(w)this.emit('close')}}
+const NX={bc:null,pcs:[],myId:null,conns:{},manual:false};
+function closeNet(){try{if(NX.bc){if(isHost)NX.bc.postMessage({k:'bye',hostBye:true});else NX.bc.postMessage({to:'host',from:NX.myId,k:'leave'});NX.bc.close()}}catch(e){}
+ NX.bc=null;NX.pcs.forEach(pc=>{try{pc.close()}catch(e){}});NX.pcs=[];NX.conns={};NX.manual=false}
+function hostIncoming(c){log('Входящее соединение:',c.peer);c.send({t:'hello',id:c.peer});c.on('data',d=>hostMsg(c,d));c.on('close',()=>{log('Игрок отключился:',c.peer);removePlayer(c.peer)})}
+function openHostLobby(id,label){me.id=hostId=id;code=label;players={};players[id]=me_();phase='lobby';setBusy(false);showLobby()}
+const rid=()=>Math.random().toString(36).slice(2,7);
+// --- способ 3: локально, через BroadcastChannel (вкладки одного браузера)
+function createLocal(){
+ if(busy)return;setBusy(true);cleanup();isHost=true;
+ if(!window.BroadcastChannel)return fail('Ваш браузер не поддерживает локальный режим');
+ const c=genCode();NX.myId='lh-'+rid();const bc=NX.bc=new BroadcastChannel('mm-'+c);
+ bc.onmessage=e=>{const d=e.data||{};if(d.to!=='host')return;
+  if(d.k==='hi'){if(NX.conns[d.from])return;const cn=new Cn(d.from);cn.tx=m=>bc.postMessage({to:d.from,from:NX.myId,m});cn.cl=()=>bc.postMessage({to:d.from,from:NX.myId,k:'kick'});cn.open=true;NX.conns[d.from]=cn;hostIncoming(cn)}
+  else if(NX.conns[d.from]){if(d.k==='leave'){NX.conns[d.from].close();delete NX.conns[d.from]}else if(d.m)NX.conns[d.from].emit('data',d.m)}};
+ openHostLobby(NX.myId,c);setStatus('Локальное лобби создано! Код: '+c+' — откройте игру в другой вкладке этого браузера','ok');
+}
+function joinLocal(c){
+ c=String(c||'').toUpperCase().replace(/[^A-Z0-9]/g,'');if(c.length<5){setStatus('Введите код лобби из 5 символов','err');return}
+ if(busy)return;setBusy(true);cleanup();isHost=false;code=c;
+ if(!window.BroadcastChannel)return fail('Ваш браузер не поддерживает локальный режим');
+ const id=NX.myId='lc-'+rid();me.id=id;const bc=NX.bc=new BroadcastChannel('mm-'+c),hc=hostConn=new Cn('host');
+ hc.tx=m=>bc.postMessage({to:'host',from:id,m});hc.cl=()=>bc.postMessage({to:'host',from:id,k:'leave'});
+ bc.onmessage=e=>{const d=e.data||{};
+  if(d.k==='bye'){if(d.hostBye&&hc.open)hc.close();return}
+  if(d.to!==id)return;if(d.k==='kick'){hc.close();return}
+  if(!hc.open){hc.open=true;hc.emit('open')}if(d.m)hc.emit('data',d.m)};
+ hc.on('open',()=>hc.send({t:'join',nick:profile.nick,avatar:profile.avatar,skin:profile.skin||'knife'}));
+ hc.on('data',clientMsg);hc.on('close',()=>{if(hostConn===hc)leave('Соединение с хостом потеряно')});
+ setStatus('Поиск локального лобби '+c+'…');bc.postMessage({k:'hi',to:'host',from:id});
+ joinTimer=setTimeout(()=>{if(cur==='menu')fail('Локальное лобби не найдено. Откройте его в другой вкладке этого же браузера')},6000);
+}
+// --- способ 2: вручную, WebRTC без сервера (обмен кодами)
+const ICE=[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}];
+const pack=d=>btoa(JSON.stringify(d)),unpack=t=>JSON.parse(atob(String(t).replace(/\s+/g,'')));
+function gather(pc){return new Promise(res=>{if(pc.iceGatheringState==='complete')return res();const f=()=>{if(pc.iceGatheringState==='complete'){pc.removeEventListener('icegatheringstatechange',f);res()}};pc.addEventListener('icegatheringstatechange',f);setTimeout(res,7000)})}
+function createManual(){
+ if(busy)return;setBusy(true);cleanup();isHost=true;
+ if(!window.RTCPeerConnection)return fail('Ваш браузер не поддерживает WebRTC');
+ NX.myId='mh-'+rid();openHostLobby(NX.myId,'ВРУЧНУЮ');NX.manual=true;renderLobby();
+ setStatus('Лобби создано. Нажмите «Пригласить игрока», чтобы получить код-приглашение','ok');
+}
+let invPc=null;
+async function makeInvite(){
+ const pc=invPc=new RTCPeerConnection({iceServers:ICE});NX.pcs.push(pc);const cn=new Cn('mp-'+rid()),dc=pc.createDataChannel('mm');
+ dc.onopen=()=>{cn.open=true;cn.tx=m=>{if(dc.readyState==='open')dc.send(JSON.stringify(m))};hostIncoming(cn);if($('#mnMsg'))$('#mnMsg').textContent='✔ Игрок подключился'};
+ dc.onmessage=e=>{try{cn.emit('data',JSON.parse(e.data))}catch(x){}};
+ dc.onclose=()=>{const w=cn.open;cn.open=false;if(w)cn.emit('close')};
+ cn.cl=()=>{try{dc.close();pc.close()}catch(e){}};
+ await pc.setLocalDescription(await pc.createOffer());await gather(pc);
+ return pack({t:'offer',sdp:pc.localDescription});
+}
+async function acceptAnswer(txt){const d=unpack(txt);if(d.t!=='answer'||!invPc)throw new Error('bad answer');await invPc.setRemoteDescription(d.sdp)}
+async function guestAnswer(txt){
+ const d=unpack(txt);if(d.t!=='offer')throw new Error('bad offer');
+ cleanup();isHost=false;const pc=new RTCPeerConnection({iceServers:ICE});NX.pcs.push(pc);const hc=hostConn=new Cn('host');
+ pc.ondatachannel=e=>{const dc=e.channel;
+  dc.onopen=()=>{hc.open=true;hc.tx=m=>{if(dc.readyState==='open')dc.send(JSON.stringify(m))};hc.cl=()=>{try{dc.close();pc.close()}catch(x){}};hc.emit('open')};
+  dc.onmessage=ev=>{try{hc.emit('data',JSON.parse(ev.data))}catch(x){}};
+  dc.onclose=()=>{const w=hc.open;hc.open=false;if(w)hc.emit('close')}};
+ hc.on('open',()=>hc.send({t:'join',nick:profile.nick,avatar:profile.avatar,skin:profile.skin||'knife'}));
+ hc.on('data',clientMsg);hc.on('close',()=>{if(hostConn===hc)leave('Соединение с хостом потеряно')});
+ await pc.setRemoteDescription(d.sdp);await pc.setLocalDescription(await pc.createAnswer());await gather(pc);
+ return pack({t:'answer',sdp:pc.localDescription});
+}
+function openMn(host){
+ const b=$('#mnBody');$('#mn').style.display='flex';
+ const cp=()=>{const o=$('#mnOut');o.select();(navigator.clipboard?navigator.clipboard.writeText(o.value):Promise.reject()).catch(()=>{try{document.execCommand('copy')}catch(e){}});$('#mnMsg').textContent='Скопировано ✓'};
+ if(host){
+  b.innerHTML='<h2>Пригласить игрока</h2><p class="note">1) Скопируйте код-приглашение и отправьте игроку (мессенджер, чат). 2) Вставьте ответный код игрока ниже и нажмите «Подключить».</p><label>Ваш код-приглашение</label><textarea id="mnOut" readonly rows="4"></textarea><button id="mnCopy" class="full">Копировать</button><label>Ответный код игрока</label><textarea id="mnIn" rows="4"></textarea><button id="mnGo" class="primary full">Подключить</button><button id="mnNew" class="full">Новое приглашение</button><div class="note" id="mnMsg"></div><button id="mnClose" class="full">Закрыть</button>';
+  const gen=async()=>{$('#mnOut').value='';$('#mnIn').value='';$('#mnMsg').textContent='Создаём приглашение…';try{$('#mnOut').value=await makeInvite();$('#mnMsg').textContent=''}catch(e){err(e);$('#mnMsg').textContent='Не удалось создать приглашение'}};
+  $('#mnNew').onclick=gen;
+  $('#mnGo').onclick=async()=>{try{await acceptAnswer($('#mnIn').value);$('#mnMsg').textContent='Соединяемся…'}catch(e){err(e);$('#mnMsg').textContent='Неверный код. Проверьте и вставьте целиком'}};
+  gen();
+ }else{
+  b.innerHTML='<h2>Подключение вручную</h2><label>Код-приглашение от хоста</label><textarea id="mnIn" rows="4"></textarea><button id="mnGo" class="primary full">Далее</button><label>Ваш ответный код (отправьте хосту)</label><textarea id="mnOut" readonly rows="4"></textarea><button id="mnCopy" class="full">Копировать</button><div class="note" id="mnMsg"></div><button id="mnClose" class="full">Закрыть</button>';
+  $('#mnGo').onclick=async()=>{$('#mnMsg').textContent='Готовим ответ…';try{$('#mnOut').value=await guestAnswer($('#mnIn').value);$('#mnMsg').textContent='Отправьте этот код хосту — подключение произойдёт автоматически'}catch(e){err(e);$('#mnMsg').textContent='Неверный код приглашения'}};
+ }
+ $('#mnCopy').onclick=cp;$('#mnClose').onclick=()=>{$('#mn').style.display='none'};
+}
+$('#btnInvite').onclick=()=>openMn(true);
+
 // ================= УПРАВЛЕНИЕ: WASD / стрелки, мышь, E, Q, Пробел =================
 const IS_TOUCH=matchMedia('(pointer:coarse)').matches||(navigator.maxTouchPoints>1&&!matchMedia('(any-pointer:fine)').matches);document.body.classList.toggle('touch',IS_TOUCH);
 let R3on=false,camYaw=0,camPitch=0,lastIn='',lastFa=0,plock=false,loading3=false,T3err=0;const KEYS={};
@@ -1308,7 +1404,7 @@ function update3D(now,dt,m,list,M,vis,spec,night,duel,inPlay,fl){
 }
 
 // ================= НАСТРОЙКИ ИНТЕРФЕЙСА: 2D/3D и язык (рус / укр) =================
-const UI=Object.assign({lang:/^uk/i.test(navigator.language||'')?'ua':'ru',view:IS_TOUCH?'2d':'3d',cam:'tp',fog:100},JSON.parse(localStorage.getItem('mm_ui')||'{}'));
+const UI=Object.assign({net:'server',lang:/^uk/i.test(navigator.language||'')?'ua':'ru',view:IS_TOUCH?'2d':'3d',cam:'tp',fog:100},JSON.parse(localStorage.getItem('mm_ui')||'{}'));
 const UAP=`Один маньяк. Остальные хотят дожить до утра.=>Один маніяк. Решта хочуть дожити до ранку.
 Тихий лес=>Тихий ліс
 Сгенерировать=>Згенерувати
@@ -1462,6 +1558,44 @@ const UAP=`Один маньяк. Остальные хотят дожить д�
 Ваша цель — чтобы вас изгнали голосованием=>Ваша мета — щоб вас вигнали голосуванням
 Выжить и вычислить маньяка=>Вижити й вирахувати маніяка
 Готово=>Готово
+Способ подключения=>Спосіб підключення
+1 · Сервер: по коду (как сейчас)=>1 · Сервер: за кодом (як зараз)
+2 · Вручную: код-приглашение=>2 · Вручну: код-запрошення
+3 · Локально: вкладки браузера=>3 · Локально: вкладки браузера
+Лобби через общий сервер PeerJS: игроки заходят по коду из 5 символов. Нужен интернет.=>Лобі через спільний сервер PeerJS: гравці заходять за кодом із 5 символів. Потрібен інтернет.
+Без сервера: хост и игрок обмениваются длинными кодами через мессенджер. Работает, когда сервер недоступен.=>Без сервера: хост і гравець обмінюються довгими кодами через месенджер. Працює, коли сервер недоступний.
+Без интернета: хост и игроки — вкладки одного браузера на одном устройстве (для теста и игры вдвоём за одним компьютером).=>Без інтернету: хост і гравці — вкладки одного браузера на одному пристрої (для тесту й гри вдвох за одним комп'ютером).
+Подключение: сервер по коду. Если сервер недоступен — выберите способ 2 или 3 в ⚙=>Підключення: сервер за кодом. Якщо сервер недоступний — оберіть спосіб 2 або 3 у ⚙
+Подключение: вручную, кодами-приглашениями (без сервера)=>Підключення: вручну, кодами-запрошеннями (без сервера)
+Подключение: локально, вкладки этого браузера=>Підключення: локально, вкладки цього браузера
+➕ Пригласить игрока (код)=>➕ Запросити гравця (код)
+Пригласить игрока=>Запросити гравця
+1) Скопируйте код-приглашение и отправьте игроку (мессенджер, чат). 2) Вставьте ответный код игрока ниже и нажмите «Подключить».=>1) Скопіюйте код-запрошення й надішліть гравцю (месенджер, чат). 2) Вставте відповідний код гравця нижче та натисніть «Підключити».
+Ваш код-приглашение=>Ваш код-запрошення
+Ответный код игрока=>Відповідний код гравця
+Подключить=>Підключити
+Новое приглашение=>Нове запрошення
+Закрыть=>Закрити
+Подключение вручную=>Підключення вручну
+Код-приглашение от хоста=>Код-запрошення від хоста
+Далее=>Далі
+Ваш ответный код (отправьте хосту)=>Ваш відповідний код (надішліть хосту)
+Создаём приглашение…=>Створюємо запрошення…
+Не удалось создать приглашение=>Не вдалося створити запрошення
+Неверный код. Проверьте и вставьте целиком=>Невірний код. Перевірте й вставте повністю
+Соединяемся…=>З'єднуємось…
+Готовим ответ…=>Готуємо відповідь…
+Отправьте этот код хосту — подключение произойдёт автоматически=>Надішліть цей код хосту — підключення відбудеться автоматично
+Неверный код приглашения=>Невірний код запрошення
+✔ Игрок подключился=>✔ Гравець підключився
+Локальное лобби создано! Код: =>Локальне лобі створено! Код: 
+ — откройте игру в другой вкладке этого браузера=> — відкрийте гру в іншій вкладці цього браузера
+Поиск локального лобби =>Пошук локального лобі 
+Локальное лобби не найдено. Откройте его в другой вкладке этого же браузера=>Локальне лобі не знайдено. Відкрийте його в іншій вкладці цього ж браузера
+Лобби создано. Нажмите «Пригласить игрока», чтобы получить код-приглашение=>Лобі створено. Натисніть «Запросити гравця», щоб отримати код-запрошення
+Ваш браузер не поддерживает WebRTC=>Ваш браузер не підтримує WebRTC
+Ваш браузер не поддерживает локальный режим=>Ваш браузер не підтримує локальний режим
+ВРУЧНУЮ=>ВРУЧНУ
 в кровать=>у ліжко
 (пока не все спят — вы без маски) =>(поки не всі сплять — ви без маски) 
 Полный экран=>Повний екран
@@ -1530,12 +1664,16 @@ function applyUI(){
  $('#game').classList.toggle('r3',R3on);
  ['v2d','v3d'].forEach(id=>$('#'+id).classList.toggle('sel',id==='v'+UI.view));
  ['vtp','vfp'].forEach(id=>$('#'+id).classList.toggle('sel',id==='v'+UI.cam));
+ ['n1','n2','n3'].forEach((id,i)=>$('#'+id).classList.toggle('sel',['server','manual','local'][i]===UI.net));
+ $('#nDesc').textContent={server:'Лобби через общий сервер PeerJS: игроки заходят по коду из 5 символов. Нужен интернет.',manual:'Без сервера: хост и игрок обмениваются длинными кодами через мессенджер. Работает, когда сервер недоступен.',local:'Без интернета: хост и игроки — вкладки одного браузера на одном устройстве (для теста и игры вдвоём за одним компьютером).'}[UI.net];
+ $('#netNote').textContent={server:'Подключение: сервер по коду. Если сервер недоступен — выберите способ 2 или 3 в ⚙',manual:'Подключение: вручную, кодами-приглашениями (без сервера)',local:'Подключение: локально, вкладки этого браузера'}[UI.net];
  $('#fogR').value=UI.fog;$('#fogV').textContent=UI.fog+'%';
  ['lru','lua'].forEach(id=>$('#'+id).classList.toggle('sel',id==='l'+(UI.lang==='ua'?'ua':'ru')));
  localStorage.setItem('mm_ui',JSON.stringify(UI));
 }
 $('#gear').onclick=()=>$('#sp').classList.toggle('open');
 $('#v2d').onclick=()=>{UI.view='2d';applyUI()};$('#v3d').onclick=()=>{UI.view='3d';applyUI()};
+$('#n1').onclick=()=>{UI.net='server';applyUI()};$('#n2').onclick=()=>{UI.net='manual';applyUI()};$('#n3').onclick=()=>{UI.net='local';applyUI()};
 $('#fogR').oninput=e=>{UI.fog=+e.target.value;$('#fogV').textContent=UI.fog+'%';localStorage.setItem('mm_ui',JSON.stringify(UI))};
 $('#vtp').onclick=()=>{UI.cam='tp';applyUI()};$('#vfp').onclick=()=>{UI.cam='fp';applyUI()};
 $('#lru').onclick=()=>{UI.lang='ru';applyUI()};$('#lua').onclick=()=>{UI.lang='ua';applyUI()};
